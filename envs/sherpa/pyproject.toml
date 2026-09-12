@@ -1,0 +1,15 @@
+[project]
+name = "voice-ime-sherpa-runtime"
+version = "0.1.0"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+    "numpy",
+    "pypinyin>=0.55.0",
+    "sentencepiece>=0.2.2",
+    "sherpa-onnx",
+    "sherpa-onnx-bin",
+    "soundfile",
+]
+
+[tool.uv]
+package = false

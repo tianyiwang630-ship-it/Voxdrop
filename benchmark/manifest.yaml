@@ -1,0 +1,56 @@
+version: 1
+samples:
+  - id: daily_zh_01
+    scene: daily_zh
+    audio: data/dataSet forASR/日常对话/日常对话1.mp3
+    reference: data/dataSet forASR/日常对话/1-文本.md
+    language: zh
+  - id: daily_zh_02
+    scene: daily_zh
+    audio: data/dataSet forASR/日常对话/日常对话2.mp3
+    reference: data/dataSet forASR/日常对话/2-文本.md
+    language: zh
+  - id: daily_en_01
+    scene: daily_en
+    audio: data/dataSet forASR/日常对话英文/日常英文1.mp3
+    reference: data/dataSet forASR/日常对话英文/1-文本.md
+    language: en
+  - id: daily_en_02
+    scene: daily_en
+    audio: data/dataSet forASR/日常对话英文/日常英文2.mp3
+    reference: data/dataSet forASR/日常对话英文/2-文本.md
+    language: en
+  - id: mixed_01
+    scene: mixed
+    audio: data/dataSet forASR/中英混输/中英混输1.mp3
+    reference: data/dataSet forASR/中英混输/1-文本.md
+    language: mixed
+  - id: mixed_02
+    scene: mixed
+    audio: data/dataSet forASR/中英混输/中英混输2.mp3
+    reference: data/dataSet forASR/中英混输/2-文本.md
+    language: mixed
+  - id: terms_01
+    scene: terminology
+    audio: data/dataSet forASR/专业热词/专业热词1.mp3
+    reference: data/dataSet forASR/专业热词/1-文本.md
+    language: mixed
+    hotwords: [Paimon Desktop, Playwright, MCP, FastAPI, Electron, Whisper, Silero VAD, ASR, hotword support, inference latency, memory usage, agent orchestration, tool calling]
+  - id: terms_02
+    scene: terminology
+    audio: data/dataSet forASR/专业热词/专业热词2.mp3
+    reference: data/dataSet forASR/专业热词/2-文本.md
+    language: mixed
+    hotwords: [Transformer, KV Cache, Paged Attention, Flash Attention, Continuous Batching, prefill, decode, Tensor Parallel, Expert Parallel, Prefix Caching, inference throughput]
+  - id: long_normal
+    scene: long_sentence
+    audio: data/dataSet forASR/长句/长句正常语速.mp3
+    reference: data/dataSet forASR/长句/1-文本.md
+    language: mixed
+    speed: normal
+  - id: long_fast
+    scene: long_sentence
+    audio: data/dataSet forASR/长句/长句快速.mp3
+    reference: data/dataSet forASR/长句/1-文本.md
+    language: mixed
+    speed: fast

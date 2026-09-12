@@ -1,0 +1,37 @@
+version: 1
+models:
+  faster-whisper-base-int8:
+    source: Systran/faster-whisper-base
+    revision: ebe41f70d5b6dfa9166e2c581c45c9c0cfc57b66
+    runtime: faster-whisper 1.2.1 / CTranslate2 CPU
+    quantization: INT8 at runtime
+    weight_sha256: d01c3014881c9c6f3133c182f3d2887eb6ca1c789a7538c5c007196857a0a6a9
+  qwen3-asr-0.6b-mlx-4bit:
+    source: mlx-community/Qwen3-ASR-0.6B-4bit
+    revision: 313d850181767edf09f00a9c289becca70e58cd0
+    runtime: mlx-audio / Metal
+    quantization: 4bit
+    weight_sha256: 70c7e67e588062adce4f10796e47ad42ead51c6671eda61a0987eae38ca95ddf
+  seaco-paraformer-contextual-int8:
+    source: iic/speech_paraformer-large-contextual_asr_nat-zh-cn-16k-common-vocab8404-onnx
+    revision: master
+    runtime: funasr-onnx 0.4.1 / ONNX Runtime CPU
+    quantization: acoustic backbone INT8; contextual embedding FP32
+    backbone_sha256: f404e6eb532b54fd95761e2b4be4ed1998e8cff3cb3b930a9bee1f2d556e5035
+    embedding_sha256: d31446a5af664291a2922cca253a4200a523f347d6fc3cb1bff356bf60a116b6
+  sherpa-zipformer-bilingual-encoder-int8:
+    source: k2-fsa/sherpa-onnx release asset sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20
+    revision: asr-models release
+    runtime: sherpa-onnx 1.13.7 / ONNX Runtime CPU
+    quantization: encoder INT8; decoder and joiner FP32
+    encoder_sha256: 8fa764187a261844f859d7143ebaa563af5d10adfece4c18a8f414c88cba2a9b
+    decoder_sha256: 2e3b5ec371f8899ee6acd829fd753ba45772df57a91bdf37cde3136354e7db7d
+    joiner_sha256: 5f2adc585dd1bec6421c8bb8660d2a73fc8b9ceb24491ef51399ba2a2f0fc31b
+    note: Full INT8 decoder/joiner produced severe token repetition on this runtime, so the deployable mixed-precision configuration is reported.
+  nemotron-3.5-asr-streaming-0.6b-q8:
+    source: nvidia/nemotron-3.5-asr-streaming-0.6b
+    revision: ea30d66debe3740a08b573244286791d423d6b3e
+    runtime: NeMo-Speech.cpp 0.1.0 / Metal
+    quantization: Q8_0 GGUF
+    weight_sha256: 3fc991d3badad7277c11030a7519832cddaf2057aafed6d4b25147e953a070b1
+    note: The older runtime-indexed revision lacked usable embedded tokenizer data for Word Boosting; the current official revision was used.

@@ -1,0 +1,13 @@
+[project]
+name = "voice-ime-funasr-runtime"
+version = "0.1.0"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+    "funasr-onnx",
+    "modelscope>=1.40.0",
+    "numpy",
+    "soundfile",
+]
+
+[tool.uv]
+package = false

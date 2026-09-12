@@ -1,0 +1,8 @@
+[project]
+name = "voice-ime-mlx-runtime"
+version = "0.1.0"
+requires-python = ">=3.11,<3.12"
+dependencies = ["mlx-audio[stt]"]
+
+[tool.uv]
+package = false

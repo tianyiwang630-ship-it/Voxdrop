@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Project-local virtual environments
+.venv/
+envs/*/.venv/
+
+# Local secrets and machine-specific configuration
+.env
+.env.*
+!.env.example
+
+# Downloaded/generated resources (recreated by setup and benchmark scripts)
+.cache/
+models/
+runtimes/
+results/*
+!results/ASR_Benchmark报告.md
+
+# macOS
+.DS_Store
+build/
+apps/macos/.build/
+**/.swiftpm/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+
+# Runtime data and temporary media
+*.sqlite
+*.sqlite3
+*.sqlite3-*
+*.db
+*.log
+*.ses
+sessions/

@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "python": {
+    "version": "3.11.15",
+    "development_path": ".cache/python/cpython-3.11-macos-aarch64-none/bin/python3",
+    "mlx_lock_sha256": "b211ac44a4f1fd18b8fed0f9848c1f5be0e11d1f654307a551bcd8c2aaa41090"
+  },
+  "model": {
+    "id": "qwen3-asr-0.6b-mlx-4bit",
+    "development_path": "models/qwen3-asr/Qwen3-ASR-0.6B-4bit",
+    "quantization_bits": 4,
+    "quantization_group_size": 64,
+    "config_sha256": "923618cf5ca452fda0253a6be5c1a17f94a2e4851d3b98beb45848565587bd72",
+    "weights_sha256": "70c7e67e588062adce4f10796e47ad42ead51c6671eda61a0987eae38ca95ddf"
+  }
+}

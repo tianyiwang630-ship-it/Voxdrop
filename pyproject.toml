@@ -1,0 +1,23 @@
+[project]
+name = "voice-ime-benchmark"
+version = "0.1.0"
+description = "Shared tooling for local ASR runtime evaluation"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+    "huggingface-hub",
+    "jiwer",
+    "numpy",
+    "psutil",
+    "pyyaml",
+    "soundfile",
+]
+
+[dependency-groups]
+dev = ["pytest"]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
