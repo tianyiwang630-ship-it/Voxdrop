@@ -2,95 +2,187 @@ import AppKit
 import ApplicationServices
 import Foundation
 
+public let voiceInputSyntheticEventMarker: Int64 = 0x564F494345494D45
+
 public struct OutputResult: Sendable {
     public let clipboard: ClipboardStatus
     public let paste: PasteStatus
     public let skipReason: String?
+
+    public init(clipboard: ClipboardStatus, paste: PasteStatus, skipReason: String?) {
+        self.clipboard = clipboard
+        self.paste = paste
+        self.skipReason = skipReason
+    }
 }
 
 public enum OutputDecision: Equatable, Sendable { case attemptPaste, skip(String) }
 
 public struct OutputPolicy: Sendable {
     public init() {}
-    public func decide(initial: FocusSnapshot?, current: FocusSnapshot?, focusChanged: Bool,
-                       accessibilityTrusted: Bool, clipboardOwned: Bool,
+
+    public func decide(accessibilityTrusted: Bool, clipboardOwned: Bool,
                        modifiersReleased: Bool) -> OutputDecision {
-        // Delivery intentionally follows the *current* system cursor, matching a
-        // physical Command-V. Browser/Electron/WeChat editors often expose unstable
-        // or non-standard accessibility nodes, so neither the original focus nor an
-        // AX "editable" classification is a reliable prerequisite.
-        if let current, current.isSecure { return .skip("secure_field") }
         guard accessibilityTrusted else { return .skip("permission_missing") }
         guard clipboardOwned else { return .skip("clipboard_changed") }
-        guard modifiersReleased else { return .skip("modifiers_pressed") }
+        guard modifiersReleased else { return .skip("modifiers_timeout") }
         return .attemptPaste
     }
 }
 
-public final class FocusTracker: @unchecked Sendable {
-    public init() {}
-    public func capture() -> FocusSnapshot? {
-        guard let app = NSWorkspace.shared.frontmostApplication else { return nil }
-        let system = AXUIElementCreateSystemWide(); var focused: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(system, kAXFocusedUIElementAttribute as CFString, &focused) == .success,
-              let element = focused else { return nil }
-        var window: CFTypeRef?
-        AXUIElementCopyAttributeValue(element as! AXUIElement, kAXWindowAttribute as CFString, &window)
-        var subrole: CFTypeRef?
-        AXUIElementCopyAttributeValue(element as! AXUIElement, kAXSubroleAttribute as CFString, &subrole)
-        var role: CFTypeRef?
-        AXUIElementCopyAttributeValue(element as! AXUIElement, kAXRoleAttribute as CFString, &role)
-        var valueSettable = DarwinBoolean(false)
-        AXUIElementIsAttributeSettable(element as! AXUIElement, kAXValueAttribute as CFString, &valueSettable)
-        let secure = (subrole as? String) == kAXSecureTextFieldSubrole
-        let textRoles = [kAXTextFieldRole, kAXTextAreaRole, kAXComboBoxRole]
-        let editable = valueSettable.boolValue || textRoles.contains(role as? String ?? "")
-        return FocusSnapshot(pid: app.processIdentifier,
-            windowToken: window.map { String(CFHash($0)) }, elementToken: String(CFHash(element)),
-            isSecure: secure, isEditable: editable)
+@MainActor
+public struct PasteEventActions {
+    public let postDown: () -> Void
+    public let postUp: () -> Void
+
+    public init(postDown: @escaping () -> Void, postUp: @escaping () -> Void) {
+        self.postDown = postDown
+        self.postUp = postUp
     }
 }
 
-public final class OutputService: @unchecked Sendable {
-    private let pasteboard: NSPasteboard
-    private let policy = OutputPolicy()
-    public init(pasteboard: NSPasteboard = .general) { self.pasteboard = pasteboard }
+@MainActor
+public struct OutputEnvironment {
+    public var writeClipboard: (String) -> Bool
+    public var clipboardChangeCount: () -> Int
+    public var clipboardText: () -> String?
+    public var accessibilityTrusted: () -> Bool
+    public var modifiersPressed: () -> Bool
+    public var keyPressed: (Int64) -> Bool
+    public var nowNanoseconds: () -> UInt64
+    public var sleepNanoseconds: (UInt64) async throws -> Void
+    public var makePasteEvents: () -> PasteEventActions?
 
-    public func deliver(text: String, initialFocus: FocusSnapshot?, focusChanged: Bool,
-                        currentFocus: FocusSnapshot?) -> OutputResult {
-        pasteboard.clearContents()
-        guard pasteboard.setString(text, forType: .string) else {
+    public init(writeClipboard: @escaping (String) -> Bool,
+                clipboardChangeCount: @escaping () -> Int,
+                clipboardText: @escaping () -> String?,
+                accessibilityTrusted: @escaping () -> Bool,
+                modifiersPressed: @escaping () -> Bool,
+                keyPressed: @escaping (Int64) -> Bool,
+                nowNanoseconds: @escaping () -> UInt64,
+                sleepNanoseconds: @escaping (UInt64) async throws -> Void,
+                makePasteEvents: @escaping () -> PasteEventActions?) {
+        self.writeClipboard = writeClipboard
+        self.clipboardChangeCount = clipboardChangeCount
+        self.clipboardText = clipboardText
+        self.accessibilityTrusted = accessibilityTrusted
+        self.modifiersPressed = modifiersPressed
+        self.keyPressed = keyPressed
+        self.nowNanoseconds = nowNanoseconds
+        self.sleepNanoseconds = sleepNanoseconds
+        self.makePasteEvents = makePasteEvents
+    }
+
+    public static func live(pasteboard: NSPasteboard = .general) -> OutputEnvironment {
+        OutputEnvironment(
+            writeClipboard: { text in
+                pasteboard.clearContents()
+                return pasteboard.setString(text, forType: .string)
+            },
+            clipboardChangeCount: { pasteboard.changeCount },
+            clipboardText: { pasteboard.string(forType: .string) },
+            accessibilityTrusted: { AXIsProcessTrusted() },
+            modifiersPressed: {
+                !CGEventSource.flagsState(.combinedSessionState)
+                    .intersection([.maskCommand, .maskControl, .maskAlternate, .maskShift])
+                    .isEmpty
+            },
+            keyPressed: { keyCode in
+                CGEventSource.keyState(.combinedSessionState, key: CGKeyCode(keyCode))
+            },
+            nowNanoseconds: { DispatchTime.now().uptimeNanoseconds },
+            sleepNanoseconds: { try await Task.sleep(nanoseconds: $0) },
+            makePasteEvents: {
+                guard let source = CGEventSource(stateID: .combinedSessionState),
+                      let down = CGEvent(keyboardEventSource: source, virtualKey: 9, keyDown: true),
+                      let up = CGEvent(keyboardEventSource: source, virtualKey: 9, keyDown: false) else {
+                    return nil
+                }
+                down.flags = .maskCommand
+                up.flags = .maskCommand
+                down.setIntegerValueField(.eventSourceUserData, value: voiceInputSyntheticEventMarker)
+                up.setIntegerValueField(.eventSourceUserData, value: voiceInputSyntheticEventMarker)
+                return PasteEventActions(
+                    postDown: { down.post(tap: .cghidEventTap) },
+                    postUp: { up.post(tap: .cghidEventTap) }
+                )
+            }
+        )
+    }
+}
+
+@MainActor
+public final class OutputService {
+    private static let clipboardPreparationNanoseconds: UInt64 = 60_000_000
+    private static let modifierPollNanoseconds: UInt64 = 20_000_000
+    private static let modifierTimeoutNanoseconds: UInt64 = 500_000_000
+    private static let keyIntervalNanoseconds: UInt64 = 20_000_000
+
+    private let policy = OutputPolicy()
+    private var environment: OutputEnvironment
+
+    public init() {
+        self.environment = .live()
+    }
+
+    public init(environment: OutputEnvironment) {
+        self.environment = environment
+    }
+
+    public func deliver(text: String, waitForKeyCodes: Set<Int64> = [],
+                        isCurrent: @escaping @MainActor () -> Bool = { true }) async -> OutputResult {
+        guard environment.writeClipboard(text) else {
             return OutputResult(clipboard: .failed, paste: .skipped, skipReason: "clipboard_failed")
         }
-        let ownedChangeCount = pasteboard.changeCount
-        // Clipboard managers observe NSPasteboard asynchronously. Give them a brief
-        // chance to settle before emitting Command-V, then verify that our payload is
-        // still the current clipboard item.
-        Thread.sleep(forTimeInterval: 0.06)
-        let modifiers = CGEventSource.flagsState(.combinedSessionState).intersection([.maskCommand, .maskControl, .maskAlternate, .maskShift])
-        switch policy.decide(initial: initialFocus, current: currentFocus, focusChanged: focusChanged,
-                             accessibilityTrusted: AXIsProcessTrusted(), clipboardOwned: pasteboard.changeCount == ownedChangeCount,
-                             modifiersReleased: modifiers.isEmpty) {
-        case .skip(let reason): return OutputResult(clipboard: .written, paste: .skipped, skipReason: reason)
-        case .attemptPaste: break
+        let ownedChangeCount = environment.clipboardChangeCount()
+        let startedAt = environment.nowNanoseconds()
+        var elapsed: UInt64 = 0
+        var inputPressed = environment.modifiersPressed()
+            || waitForKeyCodes.contains(where: environment.keyPressed)
+
+        while elapsed < Self.clipboardPreparationNanoseconds || inputPressed {
+            guard !Task.isCancelled, isCurrent() else {
+                return OutputResult(clipboard: .written, paste: .skipped, skipReason: "cancelled")
+            }
+            if elapsed >= Self.modifierTimeoutNanoseconds, inputPressed {
+                return OutputResult(clipboard: .written, paste: .skipped, skipReason: "modifiers_timeout")
+            }
+            let remainingPreparation = Self.clipboardPreparationNanoseconds > elapsed
+                ? Self.clipboardPreparationNanoseconds - elapsed : Self.modifierPollNanoseconds
+            let interval = min(Self.modifierPollNanoseconds, remainingPreparation)
+            do {
+                try await environment.sleepNanoseconds(interval)
+            } catch {
+                return OutputResult(clipboard: .written, paste: .skipped, skipReason: "cancelled")
+            }
+            elapsed = environment.nowNanoseconds() - startedAt
+            inputPressed = environment.modifiersPressed()
+                || waitForKeyCodes.contains(where: environment.keyPressed)
         }
-        guard let source = CGEventSource(stateID: .combinedSessionState),
-              let down = CGEvent(keyboardEventSource: source, virtualKey: 9, keyDown: true),
-              let up = CGEvent(keyboardEventSource: source, virtualKey: 9, keyDown: false) else {
+
+        guard !Task.isCancelled, isCurrent() else {
+            return OutputResult(clipboard: .written, paste: .skipped, skipReason: "cancelled")
+        }
+        let clipboardOwned = environment.clipboardChangeCount() == ownedChangeCount
+            || environment.clipboardText() == text
+        switch policy.decide(accessibilityTrusted: environment.accessibilityTrusted(),
+                             clipboardOwned: clipboardOwned,
+                             modifiersReleased: !environment.modifiersPressed()
+                                && !waitForKeyCodes.contains(where: environment.keyPressed)) {
+        case .skip(let reason):
+            return OutputResult(clipboard: .written, paste: .skipped, skipReason: reason)
+        case .attemptPaste:
+            break
+        }
+
+        guard let events = environment.makePasteEvents() else {
             return OutputResult(clipboard: .written, paste: .failed, skipReason: "event_creation_failed")
         }
-        down.flags = .maskCommand
-        up.flags = .maskCommand
-        // Resolve the destination at delivery time (not recording start), then put
-        // the shortcut directly on that process' event queue. WeChat uses different
-        // editor implementations for normal chats and File Transfer Assistant; the
-        // latter can drop a synthetic HID broadcast even though manual paste works.
-        guard let targetPID = NSWorkspace.shared.frontmostApplication?.processIdentifier else {
-            return OutputResult(clipboard: .written, paste: .skipped, skipReason: "focus_unknown")
-        }
-        down.postToPid(targetPID)
-        Thread.sleep(forTimeInterval: 0.02)
-        up.postToPid(targetPID)
+        events.postDown()
+        // Once key-down has been posted, key-up must always follow, even if the
+        // delivery task is cancelled during this short interval.
+        try? await environment.sleepNanoseconds(Self.keyIntervalNanoseconds)
+        events.postUp()
         return OutputResult(clipboard: .written, paste: .attempted, skipReason: nil)
     }
 }

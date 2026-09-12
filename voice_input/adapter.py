@@ -9,6 +9,12 @@ class HotwordTokenBudgetError(ValueError):
     pass
 
 
+def format_hotword_prompt(hotwords: list[str]) -> str | None:
+    if not hotwords:
+        return None
+    return f"Vocabulary: {', '.join(hotwords)}."
+
+
 def audio_has_signal(audio_path: Path) -> bool:
     """Reject only empty or exact digital silence; unknown formats remain eligible."""
     try:
@@ -38,13 +44,13 @@ class QwenMLXAdapter:
     def transcribe(self, audio_path: Path, hotwords: list[str]) -> tuple[str, str | None]:
         if not audio_has_signal(audio_path):
             return "", None
-        prompt = ", ".join(hotwords)
+        prompt = format_hotword_prompt(hotwords)
         if prompt:
             token_ids = self._model._tokenizer.encode(prompt)
             if len(token_ids) > 4096:
                 raise HotwordTokenBudgetError("hotwords exceed 4096 tokenizer tokens")
         result = self._model.generate(
-            str(audio_path), temperature=0.0, hotwords=hotwords or None
+            str(audio_path), temperature=0.0, system_prompt=prompt
         )
         language = getattr(result, "language", None)
         if isinstance(language, (list, tuple)):

@@ -14,7 +14,7 @@ public struct RuntimeConfiguration: Sendable {
         return RuntimeConfiguration(
             python: python, projectRoot: projectRoot,
             modelDirectory: ModelLocator(projectRoot: projectRoot).developmentModel(),
-            sessionDirectory: FileManager.default.temporaryDirectory.appendingPathComponent("com.local.VoiceInput/sessions", isDirectory: true))
+            sessionDirectory: FileManager.default.temporaryDirectory.appendingPathComponent("com.local.VoxDrop/sessions", isDirectory: true))
     }
 }
 

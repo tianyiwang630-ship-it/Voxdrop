@@ -2,11 +2,11 @@
 import PackageDescription
 
 let package = Package(
-    name: "VoiceInput",
+    name: "VoxDrop",
     platforms: [.macOS(.v13)],
     products: [
         .library(name: "VoiceInputCore", targets: ["VoiceInputCore"]),
-        .executable(name: "VoiceInputApp", targets: ["VoiceInputApp"]),
+        .executable(name: "VoxDrop", targets: ["VoiceInputApp"]),
         .executable(name: "VoiceInputCoreChecks", targets: ["VoiceInputCoreChecks"]),
     ],
     targets: [

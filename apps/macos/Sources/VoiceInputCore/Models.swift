@@ -42,11 +42,13 @@ public struct Session: Equatable, Sendable {
     public var focusChanged: Bool
     public var cancelled: Bool
     public let workerGeneration: Int
+    public let triggerKeyCode: Int64?
     public init(id: UUID = UUID(), mode: TriggerMode, startedAt: Date = Date(),
-                initialFocus: FocusSnapshot?, workerGeneration: Int) {
+                initialFocus: FocusSnapshot?, workerGeneration: Int, triggerKeyCode: Int64? = nil) {
         self.id = id; self.mode = mode; self.startedAt = startedAt
         self.initialFocus = initialFocus; self.focusChanged = false
         self.cancelled = false; self.workerGeneration = workerGeneration
+        self.triggerKeyCode = triggerKeyCode
     }
 }
 
@@ -89,9 +91,11 @@ public struct SessionEngine: Sendable {
     public mutating func workerReady() { if session == nil { state = .ready } }
     public mutating func block(_ reason: String) { session = nil; state = .blocked(reason) }
     public mutating func recover(_ reason: String) { session = nil; state = .recovering(reason) }
-    @discardableResult public mutating func start(_ mode: TriggerMode, focus: FocusSnapshot?, generation: Int) -> Bool {
+    @discardableResult public mutating func start(_ mode: TriggerMode, focus: FocusSnapshot?, generation: Int,
+                                                  triggerKeyCode: Int64? = nil) -> Bool {
         guard state == .ready else { return false }
-        session = Session(mode: mode, initialFocus: focus, workerGeneration: generation)
+        session = Session(mode: mode, initialFocus: focus, workerGeneration: generation,
+                          triggerKeyCode: triggerKeyCode)
         state = .recording(mode); return true
     }
     @discardableResult public mutating func stop(_ mode: TriggerMode) -> Bool {

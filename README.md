@@ -1,6 +1,6 @@
-# VoiceInput：macOS 本地语音输入
+# 言落 VoxDrop：macOS 本地语音输入
 
-VoiceInput 是一个面向 Apple Silicon Mac 的本地语音输入工具。按下全局快捷键说话，松开后，识别结果会自动粘贴到当前光标。ASR 全程在本机运行，不需要云端 API，也不会上传录音。
+言落（VoxDrop）是一个面向 Apple Silicon Mac 的本地语音输入工具。按下全局快捷键说话，松开后，识别结果会自动粘贴到当前光标。ASR 全程在本机运行，不需要云端 API，也不会上传录音。
 
 ## 为什么做这个项目
 
@@ -69,7 +69,7 @@ uv run --project . --frozen python -c 'from huggingface_hub import snapshot_down
 ./scripts/run-macos-app.sh
 ~~~
 
-脚本会构建并启动 build/VoiceInput.app。VoiceInput 是菜单栏应用，不会显示普通主窗口；启动后，屏幕顶部菜单栏会出现麦克风图标，状态应为 **Ready**。
+脚本会构建并启动 `build/言落.app`。启动后，Finder、Spotlight、Dock 与屏幕顶部菜单栏都会显示“言落”；首次启动会自动打开使用引导。
 
 ### 5. 授予 macOS 权限
 
@@ -79,26 +79,26 @@ uv run --project . --frozen python -c 'from huggingface_hub import snapshot_down
 2. **输入监控**：监听全局快捷键。
 3. **辅助功能**：向当前光标发送 Command+V。
 
-进入“系统设置 → 隐私与安全性”，在上述三个页面中打开 VoiceInput。如果“输入监控”或“辅助功能”没有自动出现 VoiceInput，点击加号，手动选择仓库中的：
+进入“系统设置 → 隐私与安全性”，在上述三个页面中打开“言落”。如果“输入监控”或“辅助功能”没有自动出现“言落”，点击加号，手动选择仓库中的：
 
 ~~~text
-build/VoiceInput.app
+build/言落.app
 ~~~
 
-授权后，从菜单栏完全退出 VoiceInput，再执行一次：
+授权后，从菜单栏完全退出“言落”，再执行一次：
 
 ~~~bash
 ./scripts/run-macos-app.sh
 ~~~
 
-可在“VoiceInput → 设置 → 诊断”中确认三项权限均为“已授权”。
+可在“言落 → 设置 → 诊断”中确认三项权限均为“已授权”。
 
 ### 6. 开始使用
 
 先将光标放入任意文本输入框：
 
-- **Hold**：按住 Control+Option+Space 说话，松开后识别并粘贴。
-- **Toggle**：按 Control+Option+Command+Space 开始，再按一次结束。
+- **Hold**：按住 Option+A 说话，松开后识别并粘贴。
+- **Toggle**：按 Option+S 开始，再按一次结束。
 - **取消**：录音或识别期间按 Esc。
 
 快捷键可在“设置 → 通用”中修改。热词可在“设置 → 热词”中按行添加、编辑、停用或删除。

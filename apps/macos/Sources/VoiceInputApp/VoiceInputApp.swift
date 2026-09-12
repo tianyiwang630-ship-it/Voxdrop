@@ -3,7 +3,8 @@ import SwiftUI
 import VoiceInputCore
 
 @main
-struct VoiceInputApp: App {
+struct VoxDropApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var model: AppModel
 
     var body: some Scene {
@@ -11,30 +12,86 @@ struct VoiceInputApp: App {
             MenuContent().environmentObject(model)
         }
         .menuBarExtraStyle(.menu)
-
-        Window("转写历史", id: "history") { HistoryView().environmentObject(model).frame(minWidth: 680, minHeight: 460) }
-        Settings { SettingsView().environmentObject(model).frame(width: 620, height: 520) }
     }
 
     init() {
-        NSApplication.shared.setActivationPolicy(.accessory)
+        NSApplication.shared.setActivationPolicy(.regular)
         let instance = AppModel()
         _model = StateObject(wrappedValue: instance)
-        DispatchQueue.main.async { instance.launch() }
+        appDelegate.model = instance
+        DispatchQueue.main.async {
+            instance.launch()
+            AppPresentation.showWelcomeIfNeeded(model: instance)
+        }
+    }
+}
+
+@MainActor
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    weak var model: AppModel?
+
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+
+    func applicationDidBecomeActive(_ notification: Notification) {
+        model?.refreshPermissionStatus()
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if !flag, let model { SettingsWindowController.shared.show(model: model) }
+        return true
+    }
+}
+
+@MainActor
+private enum AppPresentation {
+    private static let welcomeKey = "hasShownWelcomeV1"
+
+    static func showWelcomeIfNeeded(model: AppModel) {
+        let defaults = UserDefaults.standard
+        guard !defaults.bool(forKey: welcomeKey) else { return }
+        WelcomeWindowController.shared.show(model: model)
+        defaults.set(true, forKey: welcomeKey)
     }
 }
 
 struct MenuContent: View {
     @EnvironmentObject var model: AppModel
-    @Environment(\.openWindow) var openWindow
     var body: some View {
-        Text(model.stateText).font(.headline)
+        Text("言落").font(.headline)
+        Text(model.stateText).font(.caption).foregroundStyle(.secondary)
         if let error = model.errorText { Text(error).font(.caption).foregroundStyle(.red) }
         Divider()
-        Button("打开历史") { openWindow(id: "history"); NSApp.activate(ignoringOtherApps: true) }
+        Text("按住录音　\(model.holdShortcut.display)")
+        Text("切换录音　\(model.toggleShortcut.display)")
+        Divider()
+        Button("打开历史") { HistoryWindowController.shared.show(model: model) }
         Button("设置") { SettingsWindowController.shared.show(model: model) }
+        Button("使用说明") { WelcomeWindowController.shared.show(model: model) }
         Button("重试加载") { model.retry() }
         Divider(); Button("退出") { model.quit() }
+    }
+}
+
+@MainActor
+final class HistoryWindowController {
+    static let shared = HistoryWindowController()
+    private var controller: NSWindowController?
+
+    func show(model: AppModel) {
+        if controller == nil {
+            let content = HistoryView().environmentObject(model).frame(minWidth: 680, minHeight: 460)
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 760, height: 520),
+                                  styleMask: [.titled, .closable, .miniaturizable, .resizable],
+                                  backing: .buffered, defer: false)
+            window.title = "言落 · 转写历史"
+            window.contentViewController = NSHostingController(rootView: content)
+            window.isReleasedWhenClosed = false
+            window.center()
+            controller = NSWindowController(window: window)
+        }
+        controller?.showWindow(nil)
+        controller?.window?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 }
 
@@ -45,11 +102,11 @@ final class SettingsWindowController {
 
     func show(model: AppModel) {
         if controller == nil {
-            let content = SettingsView().environmentObject(model).frame(width: 620, height: 520)
-            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 620, height: 520),
+            let content = SettingsView().environmentObject(model).frame(width: 680, height: 620)
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 680, height: 620),
                                   styleMask: [.titled, .closable, .miniaturizable],
                                   backing: .buffered, defer: false)
-            window.title = "VoiceInput 设置"
+            window.title = "言落 · 设置"
             window.contentViewController = NSHostingController(rootView: content)
             window.isReleasedWhenClosed = false
             window.center()
@@ -58,6 +115,77 @@ final class SettingsWindowController {
         controller?.showWindow(nil)
         controller?.window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+}
+
+@MainActor
+final class WelcomeWindowController {
+    static let shared = WelcomeWindowController()
+    private var controller: NSWindowController?
+
+    func show(model: AppModel) {
+        if controller == nil {
+            let content = WelcomeView().environmentObject(model).frame(width: 560, height: 440)
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 440),
+                                  styleMask: [.titled, .closable], backing: .buffered, defer: false)
+            window.title = "欢迎使用言落"
+            window.contentViewController = NSHostingController(rootView: content)
+            window.isReleasedWhenClosed = false
+            window.center()
+            controller = NSWindowController(window: window)
+        }
+        controller?.showWindow(nil)
+        controller?.window?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+}
+
+struct WelcomeView: View {
+    @EnvironmentObject var model: AppModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("开始使用言落").font(.largeTitle.bold())
+                Text("先授权，再把光标放到任意输入框中使用快捷键。").foregroundStyle(.secondary)
+            }
+            GroupBox("默认快捷键") {
+                VStack(alignment: .leading, spacing: 12) {
+                    shortcutRow(model.holdShortcut.display, "按住说话，松开后识别")
+                    shortcutRow(model.toggleShortcut.display, "按一次开始，再按一次结束")
+                    shortcutRow("Esc", "取消当前录音或识别")
+                }.frame(maxWidth: .infinity, alignment: .leading).padding(6)
+            }
+            GroupBox("必需权限") {
+                VStack(spacing: 10) {
+                    permissionRow("麦克风", model.microphonePermission, action: model.requestMicrophonePermissionFromUI)
+                    permissionRow("辅助功能", model.accessibilityPermission, action: model.requestAccessibilityPermission)
+                    permissionRow("输入监控", model.inputMonitoringPermission, action: model.requestInputMonitoringPermission)
+                }.padding(6)
+            }
+            HStack {
+                Text("授权辅助功能或输入监控后，请退出并重新打开 App。")
+                    .font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                Button("打开设置") { SettingsWindowController.shared.show(model: model) }
+            }
+        }.padding(24)
+    }
+
+    private func shortcutRow(_ shortcut: String, _ explanation: String) -> some View {
+        HStack {
+            Text(shortcut).font(.title3.monospaced()).frame(width: 80, alignment: .leading)
+            Text(explanation)
+        }
+    }
+
+    private func permissionRow(_ name: String, _ status: String, action: @escaping () -> Void) -> some View {
+        HStack {
+            Text(name).frame(width: 80, alignment: .leading)
+            Text(status).foregroundStyle(status == "已授权" ? Color.green : Color.secondary)
+            Spacer()
+            Button("请求权限", action: action).disabled(status == "已授权")
+        }
     }
 }
 
@@ -101,6 +229,12 @@ struct SettingsView: View {
     var body: some View {
         TabView {
             Form {
+                GroupBox("快捷键用法") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("\(model.holdShortcut.display)　按住说话，松开后识别")
+                        Text("\(model.toggleShortcut.display)　按一次开始，再按一次结束")
+                    }.frame(maxWidth: .infinity, alignment: .leading).padding(4)
+                }
                 HStack { Text("Hold（按住）"); Spacer(); Text(model.holdShortcut.display).monospaced(); Button(model.recordingShortcut == .hold ? "请按组合键…" : "录制") { model.recordShortcut(.hold) } }
                 HStack { Text("Toggle（按一次开始/再按一次停止）"); Spacer(); Text(model.toggleShortcut.display).monospaced(); Button(model.recordingShortcut == .toggle ? "请按组合键…" : "录制") { model.recordShortcut(.toggle) } }
                 Button("恢复默认快捷键") { model.restoreShortcutDefaults() }
@@ -134,11 +268,10 @@ struct SettingsView: View {
                 LabeledContent("日志") { Text(model.logLocation).textSelection(.enabled).lineLimit(2) }
                 Text(model.errorText ?? "未发现错误").foregroundStyle(model.errorText == nil ? Color.secondary : Color.red)
                 Button("重新加载 Worker") { model.retry() }
-                Button("请求辅助功能权限") {
-                    let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
-                    _ = AXIsProcessTrustedWithOptions(options)
+                Button("打开辅助功能设置") {
+                    model.requestAccessibilityPermission()
                 }
-                Button("请求输入监控权限") { model.requestInputMonitoringPermission() }
+                Button("打开输入监控设置") { model.requestInputMonitoringPermission() }
             }.padding().tabItem { Label("诊断", systemImage: "stethoscope") }
         }
         .sheet(item: $editingHotword) { item in

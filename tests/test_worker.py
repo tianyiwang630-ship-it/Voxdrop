@@ -9,7 +9,13 @@ from pathlib import Path
 
 import pytest
 
-from voice_input.adapter import HotwordTokenBudgetError, MockAdapter, QwenMLXAdapter, audio_has_signal
+from voice_input.adapter import (
+    HotwordTokenBudgetError,
+    MockAdapter,
+    QwenMLXAdapter,
+    audio_has_signal,
+    format_hotword_prompt,
+)
 from voice_input.worker import ProtocolError, serve, validate_request
 
 
@@ -61,6 +67,13 @@ def test_conservative_silence_check_keeps_quiet_nonzero_audio(tmp_path: Path) ->
     assert audio_has_signal(quiet)
 
 
+def test_hotwords_use_qwen_recommended_vocabulary_format() -> None:
+    assert format_hotword_prompt(["王天一", "Transformer", "USC", "南加大"]) == (
+        "Vocabulary: 王天一, Transformer, USC, 南加大."
+    )
+    assert format_hotword_prompt([]) is None
+
+
 def test_qwen_adapter_enforces_real_token_budget_and_normalizes_language(tmp_path: Path) -> None:
     audio = tmp_path / "voice.wav"
     with wave.open(str(audio), "wb") as target:
@@ -74,10 +87,15 @@ def test_qwen_adapter_enforces_real_token_budget_and_normalizes_language(tmp_pat
 
     class Model:
         _tokenizer = Tokenizer()
-        def generate(self, *args, **kwargs): return Result()
+        kwargs: dict = {}
+        def generate(self, *args, **kwargs):
+            self.kwargs = kwargs
+            return Result()
 
     adapter = QwenMLXAdapter.__new__(QwenMLXAdapter); adapter._model = Model()
     assert adapter.transcribe(audio, ["词"])[1] == "Chinese"
+    assert adapter._model.kwargs["system_prompt"] == "Vocabulary: 词."
+    assert "hotwords" not in adapter._model.kwargs
     with pytest.raises(HotwordTokenBudgetError): adapter.transcribe(audio, ["x" * 4097])
 
 

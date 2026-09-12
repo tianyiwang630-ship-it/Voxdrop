@@ -1,6 +1,6 @@
 # 后续 Packaging 检查清单
 
-- [ ] 确定正式产品名、图标、Bundle ID 和最低 macOS 版本。
+- [x] 正式产品名为“言落（VoxDrop）”，图标源文件为根目录 `图标.png`，Bundle ID 为 `com.local.VoxDrop`，最低版本为 macOS 13。
 - [x] 开发 runtime/model 的 ID、相对路径和校验摘要已记录在 `config/runtime-resources.json`。
 - [ ] 决定模型随包、外置安装或下载；记录 SHA-256、来源和许可证。
 - [ ] 构建可重定位的 Python 3.11 runtime，不复制开发 `.venv` 冒充分发环境。

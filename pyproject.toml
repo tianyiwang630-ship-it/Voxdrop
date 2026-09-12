@@ -1,5 +1,5 @@
 [project]
-name = "voice-ime-benchmark"
+name = "voxdrop-benchmark"
 version = "0.1.0"
 description = "Shared tooling for local ASR runtime evaluation"
 requires-python = ">=3.11,<3.12"
