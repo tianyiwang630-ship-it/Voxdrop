@@ -268,10 +268,8 @@ struct SettingsView: View {
                 LabeledContent("日志") { Text(model.logLocation).textSelection(.enabled).lineLimit(2) }
                 Text(model.errorText ?? "未发现错误").foregroundStyle(model.errorText == nil ? Color.secondary : Color.red)
                 Button("重新加载 Worker") { model.retry() }
-                Button("打开辅助功能设置") {
-                    model.requestAccessibilityPermission()
-                }
-                Button("打开输入监控设置") { model.requestInputMonitoringPermission() }
+                Button("打开辅助功能设置") { model.openAccessibilitySettings() }
+                Button("打开输入监控设置") { model.openInputMonitoringSettings() }
             }.padding().tabItem { Label("诊断", systemImage: "stethoscope") }
         }
         .sheet(item: $editingHotword) { item in

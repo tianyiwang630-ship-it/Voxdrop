@@ -333,6 +333,12 @@ final class AppModel: ObservableObject, ShortcutDelegate {
         accessibilityPermission = AXIsProcessTrusted() ? "已授权" : "未授权（授权后需重启 App）"
         if !granted { openPrivacySettings(anchor: "Privacy_Accessibility", permissionName: "辅助功能") }
     }
+    func openAccessibilitySettings() {
+        openPrivacySettings(anchor: "Privacy_Accessibility", permissionName: "辅助功能")
+    }
+    func openInputMonitoringSettings() {
+        openPrivacySettings(anchor: "Privacy_ListenEvent", permissionName: "输入监控")
+    }
     func requestMicrophonePermissionFromUI() {
         Task {
             microphonePermission = await requestMicrophonePermission() ? "已授权" : "未授权"
