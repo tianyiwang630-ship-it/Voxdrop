@@ -33,4 +33,3 @@ final class HistoryRepositoryTests: XCTestCase {
         XCTAssertEqual(try await repository.hotwords().map(\.text), ["FastAPI"])
     }
 }
-

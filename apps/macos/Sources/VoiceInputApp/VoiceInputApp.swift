@@ -241,8 +241,13 @@ struct SettingsView: View {
                 Text("Esc 可取消当前录音或识别").foregroundStyle(.secondary)
                 Toggle("显示结果提示", isOn: $model.showResultTips)
                 LabeledContent("当前默认麦克风", value: model.microphoneName)
-                TextField("项目目录", text: $model.projectPath)
-                Button("保存并重试") { model.saveSettings(); model.retry() }
+                if model.isBundledBuild {
+                    LabeledContent("运行资源", value: "已内置，可离线使用")
+                    Button("保存设置") { model.saveSettings() }
+                } else {
+                    TextField("项目目录", text: $model.projectPath)
+                    Button("保存并重试") { model.saveSettings(); model.retry() }
+                }
             }.padding().tabItem { Label("通用", systemImage: "gear") }
             VStack {
                 Toggle("启用热词", isOn: $model.hotwordsEnabled)

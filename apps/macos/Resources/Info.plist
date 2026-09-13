@@ -11,6 +11,7 @@
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>0.1.0</string>
   <key>CFBundleVersion</key><string>1</string>
-  <key>LSMinimumSystemVersion</key><string>13.0</string>
+  <key>LSMinimumSystemVersion</key><string>26.2</string>
+  <key>LSMultipleInstancesProhibited</key><true/>
   <key>NSMicrophoneUsageDescription</key><string>用于在用户触发快捷键后录制语音并进行本地转写。</string>
 </dict></plist>

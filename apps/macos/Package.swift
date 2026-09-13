@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "VoxDrop",
-    platforms: [.macOS(.v13)],
+    platforms: [.macOS("26.2")],
     products: [
         .library(name: "VoiceInputCore", targets: ["VoiceInputCore"]),
         .executable(name: "VoxDrop", targets: ["VoiceInputApp"]),

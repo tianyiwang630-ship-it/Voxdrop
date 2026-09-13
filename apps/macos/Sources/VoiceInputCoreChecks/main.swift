@@ -171,6 +171,71 @@ struct VoiceInputCoreChecks {
         try await repository.delete(id: row.id)
         try await repository.updateOutput(id: row.id, clipboard: .written, paste: .attempted, skipReason: nil)
         let deletedPage = try await repository.page(); precondition(deletedPage.isEmpty)
+
+        let resources = root.appendingPathComponent("ReleaseResources")
+        let python = resources.appendingPathComponent("runtime/bin/python3.11")
+        let model = resources.appendingPathComponent("models/qwen3-asr/Qwen3-ASR-0.6B-4bit")
+        try FileManager.default.createDirectory(at: python.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: model, withIntermediateDirectories: true)
+        precondition(FileManager.default.createFile(atPath: python.path, contents: Data()))
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: python.path)
+        precondition(FileManager.default.createFile(atPath: model.appendingPathComponent("config.json").path, contents: Data()))
+        let weights = model.appendingPathComponent("model.safetensors")
+        precondition(FileManager.default.createFile(atPath: weights.path, contents: Data()))
+        let weightsHandle = try FileHandle(forWritingTo: weights)
+        try weightsHandle.truncate(atOffset: 708_236_945)
+        try weightsHandle.close()
+        precondition(!RuntimeConfiguration.isBundledApplication(resourcesDirectory: resources))
+        precondition(FileManager.default.createFile(
+            atPath: resources.appendingPathComponent("release-manifest.json").path,
+            contents: Data("{}".utf8)
+        ))
+        precondition(RuntimeConfiguration.isBundledApplication(resourcesDirectory: resources))
+        let sessions = root.appendingPathComponent("sessions")
+        let bundled = try RuntimeConfiguration.bundled(resourcesDirectory: resources, sessionDirectory: sessions)
+        precondition(bundled.mode == .bundled)
+        precondition(bundled.python == python)
+        precondition(bundled.modelDirectory.path == model.path)
+        precondition(bundled.sessionDirectory == sessions)
+
+        let fakeWorker = root.appendingPathComponent("fake-worker.zsh")
+        try """
+        #!/bin/zsh
+        print -r -- '{"v":1,"type":"ready","model_id":"mock","sample_rate":16000}'
+        while IFS= read -r line; do :; done
+        """.write(to: fakeWorker, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fakeWorker.path)
+        let fakeConfiguration = RuntimeConfiguration(
+            python: fakeWorker,
+            projectRoot: resources,
+            modelDirectory: model,
+            sessionDirectory: sessions
+        )
+        let fakeClient = WorkerClient(configuration: fakeConfiguration)
+        try await fakeClient.start()
+        let fakeGeneration = await fakeClient.generation
+        precondition(fakeGeneration == 1)
+        await fakeClient.stop()
+
+        let failingWorker = root.appendingPathComponent("failing-worker.zsh")
+        try """
+        #!/bin/zsh
+        print -r -- '{"v":1,"type":"error","request_id":null,"code":"MODEL_LOAD_FAILED","message":"模拟模型加载失败","retryable":true}'
+        exit 2
+        """.write(to: failingWorker, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: failingWorker.path)
+        let failingClient = WorkerClient(configuration: RuntimeConfiguration(
+            python: failingWorker,
+            projectRoot: resources,
+            modelDirectory: model,
+            sessionDirectory: sessions
+        ))
+        do {
+            try await failingClient.start()
+            preconditionFailure("startup error frame must fail Worker startup")
+        } catch {
+            precondition(error.localizedDescription == "模拟模型加载失败")
+        }
         print("VoiceInputCoreChecks: passed")
     }
 }

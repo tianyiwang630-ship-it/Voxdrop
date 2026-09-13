@@ -1,20 +1,63 @@
 import Foundation
+import Darwin
 
 public struct RuntimeConfiguration: Sendable {
+    public enum Mode: Sendable, Equatable {
+        case development
+        case bundled
+    }
+
+    public let mode: Mode
     public let python: URL
     public let projectRoot: URL
     public let modelDirectory: URL
     public let sessionDirectory: URL
-    public init(python: URL, projectRoot: URL, modelDirectory: URL, sessionDirectory: URL) {
-        self.python = python; self.projectRoot = projectRoot; self.modelDirectory = modelDirectory; self.sessionDirectory = sessionDirectory
+    public init(mode: Mode = .development, python: URL, projectRoot: URL,
+                modelDirectory: URL, sessionDirectory: URL) {
+        self.mode = mode
+        self.python = python
+        self.projectRoot = projectRoot
+        self.modelDirectory = modelDirectory
+        self.sessionDirectory = sessionDirectory
     }
 
     public static func development(projectRoot: URL) -> RuntimeConfiguration {
         let python = RuntimeLocator(projectRoot: projectRoot).developmentPython()
         return RuntimeConfiguration(
-            python: python, projectRoot: projectRoot,
+            mode: .development, python: python, projectRoot: projectRoot,
             modelDirectory: ModelLocator(projectRoot: projectRoot).developmentModel(),
             sessionDirectory: FileManager.default.temporaryDirectory.appendingPathComponent("com.local.VoxDrop/sessions", isDirectory: true))
+    }
+
+    public static func isBundledApplication(resourcesDirectory: URL?) -> Bool {
+        guard let resourcesDirectory else { return false }
+        return FileManager.default.fileExists(
+            atPath: resourcesDirectory.appendingPathComponent("release-manifest.json").path
+        )
+    }
+
+    public static func bundled(resourcesDirectory: URL, sessionDirectory: URL) throws -> RuntimeConfiguration {
+        let python = resourcesDirectory.appendingPathComponent("runtime/bin/python3.11")
+        let model = resourcesDirectory.appendingPathComponent("models/qwen3-asr/Qwen3-ASR-0.6B-4bit", isDirectory: true)
+        guard FileManager.default.isExecutableFile(atPath: python.path) else {
+            throw WorkerError.configuration("内置 Python runtime 缺失或不可执行，App 可能已损坏")
+        }
+        guard FileManager.default.fileExists(atPath: model.appendingPathComponent("config.json").path),
+              FileManager.default.fileExists(atPath: model.appendingPathComponent("model.safetensors").path) else {
+            throw WorkerError.configuration("内置语音模型缺失，App 可能已损坏")
+        }
+        let weights = model.appendingPathComponent("model.safetensors")
+        let attributes = try FileManager.default.attributesOfItem(atPath: weights.path)
+        guard (attributes[.size] as? NSNumber)?.int64Value == 708_236_945 else {
+            throw WorkerError.configuration("内置语音模型大小异常，App 可能未完整复制")
+        }
+        return RuntimeConfiguration(
+            mode: .bundled,
+            python: python,
+            projectRoot: resourcesDirectory,
+            modelDirectory: model,
+            sessionDirectory: sessionDirectory
+        )
     }
 }
 
@@ -59,6 +102,7 @@ public actor WorkerClient {
     private var timeoutTasks: [UUID: Task<Void, Never>] = [:]
     private let config: RuntimeConfiguration
     private var readerTask: Task<Void, Never>?
+    private var startupError: WorkerError?
 
     public init(configuration: RuntimeConfiguration) { config = configuration }
 
@@ -69,10 +113,14 @@ public actor WorkerClient {
         stop(reason: WorkerError.startup("Worker 已重启"))
         generation += 1
         let localGeneration = generation
+        startupError = nil
         let child = Process(); let stdinPipe = Pipe(); let stdoutPipe = Pipe(); let stderrPipe = Pipe()
         child.executableURL = config.python
-        child.arguments = ["-m", "voice_input", "--model-dir", config.modelDirectory.path, "--session-root", config.sessionDirectory.path]
+        let isolationArguments = config.mode == .bundled ? ["-I", "-B", "-u"] : ["-B", "-u"]
+        child.arguments = isolationArguments + ["-m", "voice_input", "--model-dir", config.modelDirectory.path,
+                                                "--session-root", config.sessionDirectory.path]
         child.currentDirectoryURL = config.projectRoot
+        child.environment = workerEnvironment()
         child.standardInput = stdinPipe; child.standardOutput = stdoutPipe; child.standardError = stderrPipe
         do { try child.run() } catch { throw WorkerError.startup("无法启动 ASR Worker：\(error.localizedDescription)") }
         process = child; input = stdinPipe.fileHandleForWriting
@@ -91,6 +139,10 @@ public actor WorkerClient {
         // Model load may take time; wait for the explicit ready frame with a bounded poll.
         let deadline = ContinuousClock.now + .seconds(120)
         while process === child && ContinuousClock.now < deadline {
+            if let startupError {
+                stop(reason: startupError)
+                throw startupError
+            }
             if child.isRunning, readyGeneration == localGeneration { return }
             if !child.isRunning { throw WorkerError.startup("ASR Worker 启动失败") }
             try await Task.sleep(for: .milliseconds(50))
@@ -123,8 +175,15 @@ public actor WorkerClient {
 
     public func stop(reason: Error = CancellationError()) {
         readerTask?.cancel(); readerTask = nil; input?.closeFile(); input = nil
-        if let process, process.isRunning { process.terminate() }
+        if let process, process.isRunning {
+            process.terminate()
+            let deadline = Date().addingTimeInterval(2)
+            while process.isRunning, Date() < deadline { Thread.sleep(forTimeInterval: 0.01) }
+            if process.isRunning { Darwin.kill(process.processIdentifier, SIGKILL) }
+            process.waitUntilExit()
+        }
         process = nil; readyGeneration = nil
+        startupError = nil
         let pending = continuations; continuations.removeAll()
         for task in timeoutTasks.values { task.cancel() }; timeoutTasks.removeAll()
         for continuation in pending.values { continuation.resume(throwing: reason) }
@@ -135,6 +194,10 @@ public actor WorkerClient {
               let message = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               message["v"] as? Int == 1, let type = message["type"] as? String else { return }
         if type == "ready" { readyGeneration = incomingGeneration; return }
+        if type == "error", message["request_id"] is NSNull || message["request_id"] == nil {
+            startupError = WorkerError.startup(message["message"] as? String ?? "ASR Worker 启动失败")
+            return
+        }
         guard let rawID = message["request_id"] as? String, let id = UUID(uuidString: rawID),
               let continuation = continuations.removeValue(forKey: id) else { return }
         timeoutTasks.removeValue(forKey: id)?.cancel()
@@ -158,5 +221,20 @@ public actor WorkerClient {
     private func timeout(requestID: UUID, generation incomingGeneration: Int) {
         guard incomingGeneration == generation, continuations[requestID] != nil else { return }
         stop(reason: WorkerError.remote("本地识别超过 120 秒，Worker 已停止"))
+    }
+
+    private func workerEnvironment() -> [String: String] {
+        let source = ProcessInfo.processInfo.environment
+        var environment: [String: String] = [:]
+        for key in ["HOME", "TMPDIR", "LANG", "LC_ALL"] {
+            if let value = source[key] { environment[key] = value }
+        }
+        environment["PATH"] = "/usr/bin:/bin"
+        environment["HF_HUB_OFFLINE"] = "1"
+        environment["TRANSFORMERS_OFFLINE"] = "1"
+        environment["PYTHONNOUSERSITE"] = "1"
+        environment["PYTHONDONTWRITEBYTECODE"] = "1"
+        environment["TOKENIZERS_PARALLELISM"] = "false"
+        return environment
     }
 }

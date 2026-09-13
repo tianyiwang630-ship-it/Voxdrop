@@ -27,11 +27,19 @@
 - 本地转写历史、搜索、复制和删除。
 - 会话完成或取消后删除临时录音，不上传遥测。
 
+## 安装发行版
+
+发行版支持 **Apple Silicon（M 系列）、macOS 26.2+**。下载 `VoxDrop-0.1.0-macos-arm64.dmg` 后，把“言落”拖入“应用程序”即可；Python 3.11、MLX 和 Qwen3-ASR 模型已经内置，用户不需要安装 Python、uv、Homebrew、ffmpeg、Xcode，也不需要在首次启动时下载模型。
+
+当前版本没有 Apple Developer ID 和公证。第一次打开若被 macOS 拦截，请先尝试打开一次，再进入“系统设置 → 隐私与安全性”确认打开；随后按引导授予麦克风、输入监控和辅助功能权限。
+
+当前候选 DMG 为 710,724,230 字节，SHA-256 见随发行包提供的 `SHA256SUMS.txt`。完整安装说明见 [GitHub Release 说明](docs/GitHub-Release说明.md)。
+
 ## 克隆后快速使用
 
 ### 1. 准备环境
 
-目前支持 **Apple Silicon（arm64）、macOS 13+**。先安装 Xcode Command Line Tools、[Homebrew](https://brew.sh/)、uv 和 ffmpeg：
+以下是源码开发流程，不是发行版用户的前置依赖。开发环境支持 **Apple Silicon（arm64）、macOS 26.2+**。先安装 Xcode Command Line Tools、[Homebrew](https://brew.sh/)、uv 和 ffmpeg：
 
 ~~~bash
 xcode-select --install
@@ -110,13 +118,13 @@ build/言落.app
 | 菜单显示“不可用” | 打开“设置 → 诊断”，核对模型路径和三项权限，然后点击“重新加载 Worker”。 |
 | 全局快捷键没有反应 | 检查“输入监控”和“辅助功能”，完全退出并重启 App。 |
 | 结果进入剪贴板但未自动粘贴 | 确认光标仍在输入框，并检查“辅助功能”；不要让剪贴板管理器面板停留在前台。 |
-| 提示模型目录不存在 | 重新执行上面的模型下载命令，并保持模型目录名称不变。 |
-| 移动仓库后启动失败 | 重新执行 scripts/run-macos-app.sh，它会更新 App 使用的项目路径。 |
+| 开发版提示模型目录不存在 | 重新执行上面的模型下载命令，并保持模型目录名称不变。 |
+| 移动仓库后开发版启动失败 | 重新执行 scripts/run-macos-app.sh，它会更新开发 App 使用的项目路径。发行版不依赖仓库。 |
 
 ## 开发说明
 
 - macOS 界面：Swift / SwiftUI，位于 apps/macos/。
 - ASR Worker：Python 3.11 / MLX Audio，位于 voice_input/。
-- 当前是面向源码仓库的本地开发版，App 会使用仓库内的 Python 环境和模型。
-- 目前尚未制作包含独立 runtime 和模型、经过 Developer ID 签名及公证的正式 DMG。
+- `scripts/run-macos-app.sh` 构建面向源码仓库的开发版；`scripts/build-macos-release.sh` 构建使用包内 runtime/model 的离线发行版。
+- 已生成经过 ad-hoc 签名的自包含 DMG；由于没有 Developer ID，当前版本不做 Apple 公证，首次打开会有系统警告。
 - 完整环境、评测和打包资料见 docs/ 与 [环境搭建指引](环境搭建指引.md)。

@@ -23,7 +23,13 @@ results/*
 
 # macOS
 .DS_Store
+._*
 build/
+dist/
+*.app/
+*.dmg
+*.pkg
+*.dSYM/
 apps/macos/.build/
 **/.swiftpm/
 DerivedData/

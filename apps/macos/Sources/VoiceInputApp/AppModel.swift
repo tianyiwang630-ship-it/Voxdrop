@@ -43,7 +43,14 @@ final class AppModel: ObservableObject, ShortcutDelegate {
     @Published var microphonePermission = "检测中"
     @Published var accessibilityPermission = AXIsProcessTrusted() ? "已授权" : "未授权"
     @Published var inputMonitoringPermission = CGPreflightListenEventAccess() ? "已授权" : "未授权"
-    var modelPath: String { URL(fileURLWithPath: projectPath).appendingPathComponent("models/qwen3-asr/Qwen3-ASR-0.6B-4bit").path }
+    var isBundledBuild: Bool { RuntimeConfiguration.isBundledApplication(resourcesDirectory: Bundle.main.resourceURL) }
+    var modelPath: String {
+        if let runtimeConfiguration { return runtimeConfiguration.modelDirectory.path }
+        if isBundledBuild, let resources = Bundle.main.resourceURL {
+            return resources.appendingPathComponent("models/qwen3-asr/Qwen3-ASR-0.6B-4bit").path
+        }
+        return URL(fileURLWithPath: projectPath).appendingPathComponent("models/qwen3-asr/Qwen3-ASR-0.6B-4bit").path
+    }
     var dataPath: String { AppIdentity.applicationSupportDirectory.path }
     var logLocation: String { "Console.app → 进程 VoxDrop（Worker stderr 随父进程收集）" }
 
@@ -53,6 +60,7 @@ final class AppModel: ObservableObject, ShortcutDelegate {
     private let shortcuts = ShortcutService()
     private let hud = HUDController()
     private var worker: WorkerClient?
+    private var runtimeConfiguration: RuntimeConfiguration?
     private var history: HistoryRepository?
     private var audioURL: URL?
     private var audioDuration = 0
@@ -61,6 +69,7 @@ final class AppModel: ObservableObject, ShortcutDelegate {
     private var recordingLimitTimer: Timer?
     private var deliveryTask: Task<OutputResult, Never>?
     private var deliveryID: UUID?
+    private var startupTask: Task<Void, Never>?
     private var shortcutMonitor: Any?
     private var notificationTokens: [NSObjectProtocol] = []
 
@@ -70,11 +79,11 @@ final class AppModel: ObservableObject, ShortcutDelegate {
         migrateLegacyDefaultShortcutsIfNeeded()
         shortcuts.delegate = self; shortcuts.holdShortcut = holdShortcut; shortcuts.toggleShortcut = toggleShortcut
         let center = NotificationCenter.default
-        notificationTokens.append(center.addObserver(forName: .AVCaptureDeviceWasConnected, object: nil, queue: .main) { [weak self] notification in
+        notificationTokens.append(center.addObserver(forName: AVCaptureDevice.wasConnectedNotification, object: nil, queue: .main) { [weak self] notification in
             let event = AudioSystemEvent(kind: .connected, notification: notification)
             Task { @MainActor in self?.systemAudioChanged(event) }
         })
-        notificationTokens.append(center.addObserver(forName: .AVCaptureDeviceWasDisconnected, object: nil, queue: .main) { [weak self] notification in
+        notificationTokens.append(center.addObserver(forName: AVCaptureDevice.wasDisconnectedNotification, object: nil, queue: .main) { [weak self] notification in
             let event = AudioSystemEvent(kind: .disconnected, notification: notification)
             Task { @MainActor in self?.systemAudioChanged(event) }
         })
@@ -85,31 +94,39 @@ final class AppModel: ObservableObject, ShortcutDelegate {
     }
 
     func launch() {
+        startupTask?.cancel()
         guard ProcessInfo.processInfo.machineArchitecture == "arm64" else {
             AppDiagnostics.logger.error("app_launch_blocked launch_id=\(AppDiagnostics.launchID, privacy: .public) reason=architecture")
             engine.block("首版仅支持 Apple Silicon Mac"); publish(); return
         }
-        guard !projectPath.isEmpty else {
-            AppDiagnostics.logger.error("app_launch_blocked launch_id=\(AppDiagnostics.launchID, privacy: .public) reason=project_path")
-            engine.block("请在设置中选择项目目录"); publish(); return
+        let configuration: RuntimeConfiguration
+        do {
+            configuration = try resolveRuntimeConfiguration()
+            runtimeConfiguration = configuration
+        } catch {
+            AppDiagnostics.logger.error("app_launch_blocked launch_id=\(AppDiagnostics.launchID, privacy: .public) reason=runtime_configuration")
+            engine.block(error.localizedDescription); publish(); return
         }
-        let root = URL(fileURLWithPath: projectPath, isDirectory: true)
         let support = AppIdentity.applicationSupportDirectory
         do { history = try HistoryRepository(path: support.appendingPathComponent("history.sqlite3")) }
         catch { errorText = "历史数据库无法打开：\(error.localizedDescription)" }
-        worker = WorkerClient(configuration: .development(projectRoot: root))
-        Task {
+        worker = WorkerClient(configuration: configuration)
+        startupTask = Task {
             do {
                 guard await requestMicrophonePermission() else { microphonePermission = "未授权"; throw WorkerError.configuration("麦克风权限未授权") }
+                try Task.checkCancellation()
                 microphonePermission = "已授权"
                 accessibilityPermission = AXIsProcessTrusted() ? "已授权" : "未授权"
                 inputMonitoringPermission = CGPreflightListenEventAccess() ? "已授权" : "未授权"
-                cleanupStaleSessions(root: root)
+                cleanupStaleSessions(directory: configuration.sessionDirectory)
                 try shortcuts.start()
                 try await startWorkerWithRetry()
+                try Task.checkCancellation()
                 engine.workerReady()
                 publish(); await reloadAll()
                 savePermissionDiagnostics(lastError: nil)
+            } catch is CancellationError {
+                return
             } catch {
                 AppDiagnostics.logger.error("app_launch_failed launch_id=\(AppDiagnostics.launchID, privacy: .public) state=\(self.diagnosticState, privacy: .public)")
                 savePermissionDiagnostics(lastError: error.localizedDescription)
@@ -119,6 +136,7 @@ final class AppModel: ObservableObject, ShortcutDelegate {
     }
 
     func retry() {
+        startupTask?.cancel(); startupTask = nil
         cancelPendingDelivery()
         if engine.session != nil {
             let sessionID = engine.session?.id
@@ -132,6 +150,7 @@ final class AppModel: ObservableObject, ShortcutDelegate {
         Task { await worker?.stop(); launch() }
     }
     func quit() {
+        startupTask?.cancel(); startupTask = nil
         cancelPendingDelivery()
         Task { await worker?.stop(); NSApplication.shared.terminate(nil) }
     }
@@ -163,7 +182,9 @@ final class AppModel: ObservableObject, ShortcutDelegate {
                 if showResultTips { hud.show("正在处理上一段语音", persistent: false) }; return
             }
             let sessionID = engine.session!.id
-            let root = RuntimeConfiguration.development(projectRoot: URL(fileURLWithPath: projectPath)).sessionDirectory
+            guard let root = runtimeConfiguration?.sessionDirectory else {
+                engine.block("运行环境尚未准备好"); publish(); return
+            }
             let url = root.appendingPathComponent("\(engine.session!.id.uuidString).wav")
             do {
                 try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -301,7 +322,7 @@ final class AppModel: ObservableObject, ShortcutDelegate {
     func saveSettings() {
         UserDefaults.standard.set(showResultTips, forKey: "showResultTips")
         UserDefaults.standard.set(hotwordsEnabled, forKey: "hotwordsEnabled")
-        UserDefaults.standard.set(projectPath, forKey: "projectPath")
+        if !isBundledBuild { UserDefaults.standard.set(projectPath, forKey: "projectPath") }
         if let data = try? JSONEncoder().encode(holdShortcut) { UserDefaults.standard.set(data, forKey: "holdShortcut") }
         if let data = try? JSONEncoder().encode(toggleShortcut) { UserDefaults.standard.set(data, forKey: "toggleShortcut") }
         shortcuts.holdShortcut = holdShortcut; shortcuts.toggleShortcut = toggleShortcut
@@ -464,14 +485,16 @@ final class AppModel: ObservableObject, ShortcutDelegate {
     private func startWorkerWithRetry() async throws {
         var lastError: Error = WorkerError.startup("Worker 启动失败")
         for attempt in 0..<3 {
+            try Task.checkCancellation()
             do {
                 try await worker?.start()
                 return
             }
+            catch is CancellationError { throw CancellationError() }
             catch {
                 AppDiagnostics.logger.warning("worker_start_failed launch_id=\(AppDiagnostics.launchID, privacy: .public) attempt=\(attempt + 1, privacy: .public)")
                 lastError = error
-                if attempt < 2 { try? await Task.sleep(for: .milliseconds(250 * (1 << attempt))) }
+                if attempt < 2 { try await Task.sleep(for: .milliseconds(250 * (1 << attempt))) }
             }
         }
         throw lastError
@@ -494,10 +517,24 @@ final class AppModel: ObservableObject, ShortcutDelegate {
         defaults.set(lastError, forKey: "diagnosticLastStartupError")
         defaults.set(Date(), forKey: "diagnosticLastStartupAt")
     }
-    private func cleanupStaleSessions(root: URL) {
-        let directory = RuntimeConfiguration.development(projectRoot: root).sessionDirectory
+    private func cleanupStaleSessions(directory: URL) {
         guard let items = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil) else { return }
         for item in items where item.pathExtension.lowercased() == "wav" { try? FileManager.default.removeItem(at: item) }
+    }
+
+    private func resolveRuntimeConfiguration() throws -> RuntimeConfiguration {
+        let sessionDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("com.local.VoxDrop/sessions", isDirectory: true)
+        if RuntimeConfiguration.isBundledApplication(resourcesDirectory: Bundle.main.resourceURL) {
+            guard let resources = Bundle.main.resourceURL else {
+                throw WorkerError.configuration("无法定位 App 内置资源，App 可能已损坏")
+            }
+            return try .bundled(resourcesDirectory: resources, sessionDirectory: sessionDirectory)
+        }
+        guard !projectPath.isEmpty else {
+            throw WorkerError.configuration("请在设置中选择项目目录")
+        }
+        return .development(projectRoot: URL(fileURLWithPath: projectPath, isDirectory: true))
     }
     private func systemAudioChanged(_ event: AudioSystemEvent) {
         let decision = AudioDeviceChangePolicy().decide(
